@@ -1,8 +1,15 @@
-# KVM Windows VM Provisioning
+# Windows VM Provisioning
 
-Ansible automation to provision Windows virtual machines on a Fedora KVM/libvirt host, controlled entirely from an Ansible Controller.
+Ansible automation to provision Windows virtual machines, controlled entirely from an Ansible Controller.
+
+Two provisioning targets are supported:
+
+- **Local KVM** — creates a VM on a Fedora KVM/libvirt host over SSH.
+- **AWS EC2** — launches a Windows instance on Amazon EC2 via API calls from the controller.
 
 ## Architecture
+
+### Local KVM
 
 ```
 Ansible Controller
@@ -16,11 +23,23 @@ Fedora KVM Host
 Windows VM
 ```
 
-- **Ansible Controller** — the single operational entry point. All provisioning commands are run here.
-- **Fedora KVM Host** — the infrastructure target. Ansible connects to it over SSH and manages libvirt/KVM resources remotely.
-- **Windows VM** — the workload created and started by Ansible on the KVM host.
+### AWS EC2
 
-The operator never needs to SSH into the Fedora host for normal VM provisioning.
+```
+Ansible Controller
+       |
+       | AWS API (boto3)
+       v
+Amazon EC2
+       |
+       v
+Windows Instance
+```
+
+- **Ansible Controller** — the single operational entry point. All provisioning commands are run here.
+- **Fedora KVM Host** (KVM path) — managed over SSH by Ansible.
+- **Amazon EC2** (AWS path) — managed via API calls that run locally on the controller.
+- **Windows VM / Instance** — the workload created by Ansible.
 
 ---
 
@@ -138,20 +157,24 @@ ansible-galaxy collection install -r requirements.yml
 
 This installs:
 
-- `community.libvirt` — provides `community.libvirt.virt` for managing VMs.
+- `community.libvirt` — provides `community.libvirt.virt` for managing VMs (KVM path).
+- `amazon.aws` — provides EC2 modules (AWS path).
+- `community.general` — general-purpose filters used by the AWS role.
 
 ### 2.3 Python dependencies
 
-The `community.libvirt` collection requires the `libvirt-python` package on the **Controller** (or wherever the Ansible connection plugin runs Python). If you see import errors:
+**For KVM provisioning:** the `community.libvirt` collection requires `libvirt-python`:
 
 ```bash
 pip install libvirt-python
+# or
+sudo dnf install -y python3-libvirt
 ```
 
-On Fedora, you can also install it via:
+**For AWS provisioning:** the `amazon.aws` collection requires `boto3` and `botocore`:
 
 ```bash
-sudo dnf install -y python3-libvirt
+pip install boto3 botocore
 ```
 
 ---
@@ -181,6 +204,8 @@ ansible -i inventory/hosts.yml kvm_hosts -m ping
 
 ## 4. Variables
 
+### 4.1 KVM Variables (`windows_vm` role)
+
 | Variable | Default | Description |
 |---|---|---|
 | `vm_name` | `windows-vm` | Name of the virtual machine |
@@ -200,9 +225,33 @@ ansible -i inventory/hosts.yml kvm_hosts -m ping
 | `vm_boot_cdrom_first` | `true` | Boot from CD-ROM first for installation |
 | `vm_disk_path` | (computed) | Full path to the VM disk image |
 
+### 4.2 AWS Variables (`windows_vm_aws` role)
+
+| Variable | Default | Description |
+|---|---|---|
+| `aws_instance_name` | `windows-vm` | Instance Name tag (used for idempotency) |
+| `aws_region` | `us-east-1` | AWS region |
+| `aws_instance_type` | `t3.large` | EC2 instance type |
+| `aws_ami_id` | (auto-discover) | Specific AMI ID; leave empty to find latest Windows Server 2022 |
+| `aws_ami_owner` | `amazon` | AMI owner for auto-discovery |
+| `aws_ami_name_filter` | `Windows_Server-2022-English-Full-Base-*` | AMI name pattern for auto-discovery |
+| `aws_key_name` | `my-keypair` | EC2 key pair name (must exist in the account) |
+| `aws_vpc_id` | (default VPC) | VPC ID; leave empty to use the default VPC |
+| `aws_subnet_id` | (default subnet) | Subnet ID; leave empty for default |
+| `aws_security_group_name` | `windows-vm-sg` | Security group name |
+| `aws_allowed_rdp_cidrs` | `["0.0.0.0/0"]` | CIDRs allowed RDP access (restrict in production) |
+| `aws_allowed_winrm_cidrs` | `[]` | CIDRs allowed WinRM HTTPS access |
+| `aws_root_volume_size` | `60` | Root EBS volume size in GB |
+| `aws_root_volume_type` | `gp3` | EBS volume type |
+| `aws_assign_public_ip` | `true` | Assign a public IP address |
+| `aws_tags` | `{}` | Additional tags applied to all resources |
+| `aws_user_data` | (empty) | PowerShell user data script for bootstrap |
+
 ---
 
 ## 5. Provisioning a Windows VM
+
+### 5.1 KVM Provisioning
 
 Run from the **Controller**:
 
@@ -237,9 +286,57 @@ ansible-playbook -i inventory/hosts.yml \
   -e vm_firmware=uefi
 ```
 
+### 5.2 AWS Provisioning
+
+**Prerequisites:**
+
+1. AWS credentials configured (environment variables, `~/.aws/credentials`, or IAM role):
+   ```bash
+   export AWS_ACCESS_KEY_ID="AKIA..."
+   export AWS_SECRET_ACCESS_KEY="..."
+   export AWS_REGION="us-east-1"
+   ```
+
+2. An EC2 key pair created in the target region:
+   ```bash
+   aws ec2 create-key-pair --key-name my-keypair --query 'KeyMaterial' --output text > my-keypair.pem
+   chmod 400 my-keypair.pem
+   ```
+
+**Run from the Controller:**
+
+```bash
+ansible-playbook playbooks/provision_windows_aws.yml \
+  -e aws_instance_name=win-demo01 \
+  -e aws_instance_type=t3.large \
+  -e aws_key_name=my-keypair \
+  -e aws_root_volume_size=80
+```
+
+With a specific AMI and region:
+
+```bash
+ansible-playbook playbooks/provision_windows_aws.yml \
+  -e aws_instance_name=win-demo01 \
+  -e aws_region=eu-west-1 \
+  -e aws_ami_id=ami-0abcdef1234567890 \
+  -e aws_key_name=my-keypair
+```
+
+Restrict RDP access to your IP:
+
+```bash
+ansible-playbook playbooks/provision_windows_aws.yml \
+  -e aws_instance_name=win-demo01 \
+  -e aws_key_name=my-keypair \
+  -e '{"aws_allowed_rdp_cidrs": ["203.0.113.10/32"]}'
+```
+
 ---
 
 ## 6. Expected Result
+
+### 6.1 KVM
 
 On successful provisioning, the playbook reports:
 
@@ -273,6 +370,38 @@ On successful provisioning, the playbook reports:
 
 The VM will boot from the Windows ISO. Connect to the VM's SPICE console to complete the interactive Windows installation.
 
+### 6.2 AWS
+
+```
+========================================
+ AWS Windows VM Provisioning Summary
+========================================
+ Instance Name:   win-demo01
+ Instance ID:     i-0abc123def456789a
+ State:           running
+ Already Existed: False
+----------------------------------------
+ Instance Type:   t3.large
+ AMI:             ami-0abcdef1234567890
+ Region:          us-east-1
+----------------------------------------
+ Public IP:       54.123.45.67
+ Private IP:      172.31.10.20
+ Key Pair:        my-keypair
+ Security Group:  windows-vm-sg
+----------------------------------------
+ Root Volume:     80 GB (gp3)
+========================================
+ Instance created and running.
+ Retrieve the Windows password:
+   aws ec2 get-password-data \
+     --instance-id i-0abc123def456789a \
+     --priv-launch-key /path/to/my-keypair.pem \
+     --region us-east-1
+ Then connect via RDP to 54.123.45.67
+========================================
+```
+
 ---
 
 ## 7. Idempotency
@@ -282,7 +411,9 @@ The playbook is safe to run multiple times.
 - **VM does not exist**: creates the disk, defines the VM, starts it.
 - **VM already exists**: reports that the VM exists and makes no changes. The existing disk, configuration, and state are preserved.
 
-No destructive operations are performed. The playbook will never destroy, undefine, or overwrite an existing VM.
+Both playbooks follow the same principle — no destructive operations are performed. The playbooks will never destroy, terminate, undefine, or overwrite an existing VM/instance.
+
+For AWS specifically, idempotency is based on the `Name` tag — if an instance with the given name exists and is not terminated, creation is skipped.
 
 ---
 
@@ -386,35 +517,99 @@ pip install libvirt-python
 sudo dnf install -y python3-libvirt
 ```
 
+### AWS: "No module named 'boto3'"
+
+```bash
+pip install boto3 botocore
+```
+
+### AWS: "Unable to locate credentials"
+
+Ensure credentials are available. Any of these methods works:
+
+```bash
+# Environment variables
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+
+# Or named profile
+export AWS_PROFILE=my-profile
+
+# Or configure the default profile
+aws configure
+```
+
+### AWS: "An error occurred (UnauthorizedOperation)"
+
+The IAM user/role needs at minimum these permissions:
+- `ec2:RunInstances`, `ec2:DescribeInstances`, `ec2:CreateTags`
+- `ec2:CreateSecurityGroup`, `ec2:AuthorizeSecurityGroupIngress`, `ec2:DescribeSecurityGroups`
+- `ec2:DescribeVpcs`, `ec2:DescribeSubnets`
+- `ec2:DescribeImages`
+
+### AWS: "VPCIdNotSpecified" or no default VPC
+
+Either create a default VPC or provide `aws_vpc_id` and `aws_subnet_id` explicitly:
+
+```bash
+ansible-playbook playbooks/provision_windows_aws.yml \
+  -e aws_vpc_id=vpc-0123456789abcdef0 \
+  -e aws_subnet_id=subnet-0123456789abcdef0 \
+  -e aws_instance_name=win-demo01 \
+  -e aws_key_name=my-keypair
+```
+
+### AWS: Cannot retrieve Windows password
+
+The password takes a few minutes to become available after launch:
+
+```bash
+aws ec2 get-password-data \
+  --instance-id i-0abc123def456789a \
+  --priv-launch-key /path/to/my-keypair.pem \
+  --region us-east-1
+```
+
+If the output is empty, wait 5–10 minutes and retry.
+
 ---
 
 ## 9. Project Structure
 
 ```
 kvm-windows/
-├── ansible.cfg                    # Ansible configuration
-├── requirements.yml               # Required Ansible collections
+├── ansible.cfg                        # Ansible configuration
+├── requirements.yml                   # Required Ansible collections
 ├── inventory/
-│   └── hosts.yml                  # KVM host inventory
+│   └── hosts.yml                      # Inventory (KVM host + localhost)
 ├── playbooks/
-│   └── provision_windows.yml      # Main provisioning playbook
+│   ├── provision_windows.yml          # KVM provisioning playbook
+│   └── provision_windows_aws.yml      # AWS provisioning playbook
 ├── roles/
-│   └── windows_vm/
-│       ├── defaults/
-│       │   └── main.yml           # Default variables
+│   ├── windows_vm/                    # KVM role
+│   │   ├── defaults/main.yml
+│   │   ├── tasks/
+│   │   │   ├── main.yml
+│   │   │   ├── validate.yml
+│   │   │   ├── preflight.yml
+│   │   │   ├── provision.yml
+│   │   │   └── summary.yml
+│   │   ├── templates/vm.xml.j2
+│   │   ├── handlers/main.yml
+│   │   ├── files/                     # Reserved for autounattend.xml
+│   │   └── README.md
+│   └── windows_vm_aws/               # AWS role
+│       ├── defaults/main.yml
 │       ├── tasks/
-│       │   ├── main.yml           # Task entry point
-│       │   ├── validate.yml       # Variable validation
-│       │   ├── preflight.yml      # Prerequisite checks
-│       │   ├── provision.yml      # VM creation logic
-│       │   └── summary.yml        # Provisioning report
-│       ├── templates/
-│       │   └── vm.xml.j2          # libvirt VM XML template
-│       ├── handlers/
-│       │   └── main.yml           # Handlers (reserved)
-│       ├── files/                 # Reserved for autounattend.xml
-│       └── README.md              # Role documentation
-└── README.md                     # This file
+│       │   ├── main.yml
+│       │   ├── validate.yml
+│       │   ├── ami.yml
+│       │   ├── network.yml
+│       │   ├── provision.yml
+│       │   └── summary.yml
+│       ├── handlers/main.yml
+│       └── README.md
+└── README.md
 ```
 
 ---
@@ -434,10 +629,20 @@ Both commands are executed **remotely on the KVM host** by Ansible — the opera
 
 ## 11. Limitations
 
+**KVM:**
+
 - Windows installation is **interactive** — the VM boots from the ISO and requires manual console interaction to complete the OS installation.
 - No `autounattend.xml` is provided yet for unattended installation.
 - No WinRM or SSH bootstrap is configured on the Windows guest.
 - The VM uses SPICE for console access; the operator needs network access to the KVM host's SPICE port, or access to virt-manager.
+
+**AWS:**
+
+- The instance uses the default Windows AMI with no customization — initial access is via RDP with the auto-generated administrator password.
+- No WinRM or user data bootstrap is configured by default.
+- The security group defaults to `0.0.0.0/0` for RDP — restrict `aws_allowed_rdp_cidrs` in production.
+- The role uses the default VPC unless `aws_vpc_id` is provided.
+- No Elastic IP is assigned — the public IP may change if the instance is stopped and started.
 
 ---
 
