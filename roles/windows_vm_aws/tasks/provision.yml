@@ -32,16 +32,6 @@
     ec2_private_ip: "{{ existing_instances.instances[0].private_ip_address | default('none') }}"
   when: instance_already_exists
 
-- name: Build network interface specification
-  ansible.builtin.set_fact:
-    ec2_network_interfaces:
-      - assign_public_ip: "{{ aws_assign_public_ip }}"
-        device_index: 0
-        groups:
-          - "{{ sg_result.group_id }}"
-        subnet_id: "{{ aws_subnet_id if aws_subnet_id | length > 0 else omit }}"
-  when: not instance_already_exists
-
 - name: Launch the Windows EC2 instance
   amazon.aws.ec2_instance:
     name: "{{ aws_instance_name }}"
@@ -49,8 +39,11 @@
     instance_type: "{{ aws_instance_type }}"
     image_id: "{{ resolved_ami_id }}"
     key_name: "{{ aws_key_name }}"
+    security_groups:
+      - "{{ sg_result.group_id }}"
+    vpc_subnet_id: "{{ aws_subnet_id if aws_subnet_id | length > 0 else omit }}"
     network:
-      interfaces: "{{ ec2_network_interfaces }}"
+      assign_public_ip: "{{ aws_assign_public_ip }}"
     volumes:
       - device_name: /dev/sda1
         ebs:
