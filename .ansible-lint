@@ -1,0 +1,5 @@
+---
+# Skip var-naming[no-role-prefix] — role variables use short names (vm_name, vm_memory, etc.)
+# for CLI ergonomics with ansible-playbook -e. This is an intentional design choice.
+skip_list:
+  - var-naming[no-role-prefix]

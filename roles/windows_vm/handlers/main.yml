@@ -1,0 +1,3 @@
+---
+# Handlers for the windows_vm role
+# Reserved for future use (e.g., restarting libvirtd after config changes)

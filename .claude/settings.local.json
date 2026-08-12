@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(ansible-galaxy collection *)",
+      "Bash(ansible-playbook *)",
+      "Bash(pip install *)",
+      "Bash(ansible-lint *)"
+    ]
+  }
+}
