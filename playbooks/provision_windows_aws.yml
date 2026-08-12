@@ -1,0 +1,9 @@
+---
+- name: Provision a Windows VM on AWS EC2
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  roles:
+    - windows_vm_aws

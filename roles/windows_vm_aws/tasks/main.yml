@@ -1,0 +1,15 @@
+---
+- name: Validate variables
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Resolve the Windows AMI
+  ansible.builtin.import_tasks: ami.yml
+
+- name: Provision networking prerequisites
+  ansible.builtin.import_tasks: network.yml
+
+- name: Provision the Windows EC2 instance
+  ansible.builtin.import_tasks: provision.yml
+
+- name: Display provisioning summary
+  ansible.builtin.import_tasks: summary.yml

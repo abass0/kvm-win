@@ -1,0 +1,47 @@
+---
+# Instance identity
+aws_instance_name: "windows-vm"
+
+# AWS region
+aws_region: "us-east-1"
+
+# Instance type
+aws_instance_type: "t3.large"
+
+# Windows AMI — set to a specific AMI ID, or leave empty to auto-discover
+# the latest Windows Server 2022 Base AMI from Amazon
+aws_ami_id: ""
+
+# AMI lookup filters (used when aws_ami_id is empty)
+aws_ami_owner: "amazon"
+aws_ami_name_filter: "Windows_Server-2022-English-Full-Base-*"
+
+# SSH / RDP key pair — must already exist in the AWS account
+aws_key_name: "my-keypair"
+
+# Networking — leave empty to use the default VPC and a default subnet
+aws_vpc_id: ""
+aws_subnet_id: ""
+
+# Security group
+aws_security_group_name: "windows-vm-sg"
+aws_allowed_rdp_cidrs:
+  - "0.0.0.0/0"
+aws_allowed_winrm_cidrs: []
+
+# Storage
+aws_root_volume_size: 60
+aws_root_volume_type: "gp3"
+
+# Tags applied to every resource created
+aws_tags: {}
+
+# Whether to assign a public IP (requires a public subnet)
+aws_assign_public_ip: true
+
+# Instance metadata options
+aws_instance_metadata_http_tokens: "required"
+
+# User data script — path to a file on the controller, or inline PowerShell
+# Leave empty for no user data (interactive RDP setup)
+aws_user_data: ""
