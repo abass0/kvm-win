@@ -20,8 +20,8 @@ aws_ami_name_filter: "Windows_Server-2022-English-Full-Base-*"
 aws_key_name: "my-keypair"
 
 # Networking — leave empty to use the default VPC and a default subnet
-aws_vpc_id: ""
-aws_subnet_id: ""
+aws_vpc_id: "vpc-0b8c30ce84b95051c"
+aws_subnet_id: "subnet-081c63257ef30f545"
 
 # Security group
 aws_security_group_name: "windows-vm-sg"
