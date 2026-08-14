@@ -1,0 +1,29 @@
+---
+- name: Initialize security group rules
+  ansible.builtin.set_fact:
+    sg_rules: []
+
+- name: Add SSH rules
+  ansible.builtin.set_fact:
+    sg_rules: "{{ sg_rules + [ssh_entry] }}"
+  loop: "{{ aws_allowed_ssh_cidrs }}"
+  vars:
+    ssh_entry:
+      proto: tcp
+      from_port: 22
+      to_port: 22
+      cidr_ip: "{{ item }}"
+      rule_desc: SSH
+
+- name: Create security group for the Linux instance
+  amazon.aws.ec2_security_group:
+    name: "{{ aws_security_group_name }}"
+    description: >-
+      Security group for Linux VM {{ aws_instance_name }}
+    vpc_id: "{{ resolved_vpc_id }}"
+    region: "{{ aws_region }}"
+    rules: "{{ sg_rules }}"
+    tags: >-
+      {{ aws_tags | combine({'Name': aws_security_group_name}) }}
+    state: present
+  register: sg_result

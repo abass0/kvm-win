@@ -1,0 +1,62 @@
+---
+- name: Validate that vm_name is defined and not empty
+  ansible.builtin.assert:
+    that:
+      - vm_name is defined
+      - vm_name | length > 0
+    fail_msg: "vm_name must be defined and not empty."
+    quiet: true
+
+- name: Validate that vm_memory is a positive integer
+  ansible.builtin.assert:
+    that:
+      - vm_memory | int > 0
+    fail_msg: >-
+      vm_memory must be a positive integer (MiB).
+      Got: '{{ vm_memory }}'.
+    quiet: true
+
+- name: Validate that vm_vcpus is a positive integer
+  ansible.builtin.assert:
+    that:
+      - vm_vcpus | int > 0
+    fail_msg: >-
+      vm_vcpus must be a positive integer.
+      Got: '{{ vm_vcpus }}'.
+    quiet: true
+
+- name: Validate that vm_disk_size is defined and not empty
+  ansible.builtin.assert:
+    that:
+      - vm_disk_size is defined
+      - vm_disk_size | length > 0
+    fail_msg: >-
+      vm_disk_size must be defined (e.g., '60G').
+      Got: '{{ vm_disk_size }}'.
+    quiet: true
+
+- name: Validate that vm_install_iso path is defined
+  ansible.builtin.assert:
+    that:
+      - vm_install_iso is defined
+      - vm_install_iso | length > 0
+    fail_msg: >-
+      vm_install_iso must be defined with the path to
+      the installation ISO on the KVM host.
+    quiet: true
+
+- name: Validate that vm_network is defined
+  ansible.builtin.assert:
+    that:
+      - vm_network is defined
+      - vm_network | length > 0
+    fail_msg: "vm_network must be defined."
+    quiet: true
+
+- name: Validate that vm_storage_pool is defined
+  ansible.builtin.assert:
+    that:
+      - vm_storage_pool is defined
+      - vm_storage_pool | length > 0
+    fail_msg: "vm_storage_pool must be defined."
+    quiet: true

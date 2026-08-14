@@ -1,0 +1,8 @@
+---
+- name: Provision a Linux VM on a Fedora KVM host
+  hosts: kvm_hosts
+  gather_facts: true
+  become: true
+
+  roles:
+    - kvm_vm_linux

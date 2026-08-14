@@ -5,4 +5,4 @@
   become: true
 
   roles:
-    - windows_vm
+    - kvm_vm_windows

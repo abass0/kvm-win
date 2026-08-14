@@ -1,0 +1,42 @@
+---
+- name: Initialize security group rules
+  ansible.builtin.set_fact:
+    sg_rules: []
+
+- name: Add RDP rules
+  ansible.builtin.set_fact:
+    sg_rules: "{{ sg_rules + [rdp_entry] }}"
+  loop: "{{ aws_allowed_rdp_cidrs }}"
+  vars:
+    rdp_entry:
+      proto: tcp
+      from_port: 3389
+      to_port: 3389
+      cidr_ip: "{{ item }}"
+      rule_desc: RDP
+
+- name: Add WinRM rules
+  ansible.builtin.set_fact:
+    sg_rules: "{{ sg_rules + [winrm_entry] }}"
+  loop: "{{ aws_allowed_winrm_cidrs }}"
+  vars:
+    winrm_entry:
+      proto: tcp
+      from_port: 5986
+      to_port: 5986
+      cidr_ip: "{{ item }}"
+      rule_desc: WinRM HTTPS
+  when: aws_allowed_winrm_cidrs | length > 0
+
+- name: Create security group for the Windows instance
+  amazon.aws.ec2_security_group:
+    name: "{{ aws_security_group_name }}"
+    description: >-
+      Security group for Windows VM {{ aws_instance_name }}
+    vpc_id: "{{ resolved_vpc_id }}"
+    region: "{{ aws_region }}"
+    rules: "{{ sg_rules }}"
+    tags: >-
+      {{ aws_tags | combine({'Name': aws_security_group_name}) }}
+    state: present
+  register: sg_result

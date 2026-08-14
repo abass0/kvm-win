@@ -1,0 +1,40 @@
+---
+- name: Gather VM info
+  community.libvirt.virt:
+    command: status
+    name: "{{ vm_name }}"
+  register: final_vm_status
+
+- name: Display Windows VM provisioning summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+       KVM Windows VM Provisioning Summary
+      ========================================
+       VM Name:        {{ vm_name }}
+       Status:         {{ final_vm_status.status }}
+       Already Existed: {{ vm_already_exists | default(false) }}
+      ----------------------------------------
+       vCPUs:          {{ vm_vcpus }}
+       Memory:         {{ vm_memory }} MiB
+       Disk:           {{ vm_disk_path }}
+       Disk Size:      {{ vm_disk_size }}
+      ----------------------------------------
+       Install ISO:    {{ vm_install_iso }}
+       VirtIO ISO:     {{ vm_extra_iso | default('not configured') }}
+       Network:        {{ vm_network }}
+       Storage Pool:   {{ vm_storage_pool }}
+      ----------------------------------------
+       KVM Host:       {{ inventory_hostname }}
+       Machine Type:   {{ vm_machine_type }}
+       Firmware:       {{ vm_firmware }}
+      ========================================
+      {% if vm_already_exists | default(false) %}
+       NOTE: VM already existed. No changes were made.
+      {% else %}
+       VM created and started successfully.
+       Connect via: virt-manager or virt-viewer,
+       or use SPICE/VNC remotely to complete
+       Windows installation.
+      {% endif %}
+      ========================================

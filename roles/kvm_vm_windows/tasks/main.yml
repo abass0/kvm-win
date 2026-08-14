@@ -1,0 +1,15 @@
+---
+- name: Validate variables
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../kvm_vm/tasks/validate.yml"
+
+- name: Validate prerequisites on KVM host
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../kvm_vm/tasks/preflight.yml"
+
+- name: Provision the Windows VM
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../kvm_vm/tasks/provision.yml"
+
+- name: Display provisioning summary
+  ansible.builtin.import_tasks: summary.yml

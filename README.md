@@ -1,11 +1,15 @@
-# Windows VM Provisioning
+# VM Provisioning Automation
 
-Ansible automation to provision Windows virtual machines, controlled entirely from an Ansible Controller.
+Ansible automation to provision Windows and Linux virtual machines, controlled entirely from an Ansible Controller.
 
-Two provisioning targets are supported:
+Four provisioning paths are supported:
 
-- **Local KVM** — creates a VM on a Fedora KVM/libvirt host over SSH.
-- **AWS EC2** — launches a Windows instance on Amazon EC2 via API calls from the controller.
+| Playbook | Target | OS |
+|---|---|---|
+| `provision_windows.yml` | Fedora KVM/libvirt | Windows |
+| `provision_linux.yml` | Fedora KVM/libvirt | Linux |
+| `provision_windows_aws.yml` | AWS EC2 | Windows |
+| `provision_linux_aws.yml` | AWS EC2 | Linux |
 
 ## Architecture
 
@@ -20,7 +24,7 @@ Fedora KVM Host
        |
        | libvirt/KVM
        v
-Windows VM
+Windows / Linux VM
 ```
 
 ### AWS EC2
@@ -33,13 +37,12 @@ Ansible Controller
 Amazon EC2
        |
        v
-Windows Instance
+Windows / Linux Instance
 ```
 
-- **Ansible Controller** — the single operational entry point. All provisioning commands are run here.
+- **Ansible Controller** — the single operational entry point.
 - **Fedora KVM Host** (KVM path) — managed over SSH by Ansible.
-- **Amazon EC2** (AWS path) — managed via API calls that run locally on the controller.
-- **Windows VM / Instance** — the workload created by Ansible.
+- **Amazon EC2** (AWS path) — managed via API calls from the controller.
 
 ---
 
@@ -58,20 +61,14 @@ sudo systemctl enable --now libvirtd
 ### 1.2 Verify KVM support
 
 ```bash
-# On the Fedora KVM host
 sudo virt-host-validate qemu
 ```
-
-All checks should report `PASS`.
 
 ### 1.3 Configure the Ansible user
 
 ```bash
-# On the Fedora KVM host — replace 'ansible' with your chosen username
 sudo useradd -m ansible
 sudo usermod -aG libvirt ansible
-
-# Allow passwordless sudo for Ansible operations
 echo 'ansible ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/ansible
 sudo chmod 0440 /etc/sudoers.d/ansible
 ```
@@ -79,61 +76,43 @@ sudo chmod 0440 /etc/sudoers.d/ansible
 ### 1.4 Configure SSH access
 
 ```bash
-# On the Controller — copy your SSH key to the Fedora host
+# On the Controller
 ssh-copy-id ansible@fedora-kvm
-```
-
-Verify connectivity:
-
-```bash
 ssh ansible@fedora-kvm "hostname && virsh version"
 ```
 
 ### 1.5 Configure the default storage pool
 
 ```bash
-# On the Fedora KVM host (if the default pool doesn't exist)
 sudo virsh pool-define-as default dir --target /var/lib/libvirt/images
 sudo virsh pool-build default
 sudo virsh pool-start default
 sudo virsh pool-autostart default
 ```
 
-### 1.6 Create an ISO directory and place installation media
+### 1.6 Place installation media
 
 ```bash
-# On the Fedora KVM host
 sudo mkdir -p /var/lib/libvirt/images/iso
-
-# Copy your Windows ISO and VirtIO driver ISO to this directory
-# Windows ISO: e.g., Win11_23H2_English_x64.iso
-# VirtIO ISO:  e.g., virtio-win.iso (download from https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/)
+# Copy Windows ISO, VirtIO driver ISO, and/or Linux ISOs here
 ```
 
 ### 1.7 Configure VM networking
 
-The `default` NAT network is usually created automatically by libvirt. Verify:
-
 ```bash
-# On the Fedora KVM host
 sudo virsh net-list --all
-```
-
-If it is not active:
-
-```bash
+# If not active:
 sudo virsh net-start default
 sudo virsh net-autostart default
 ```
 
-### 1.8 Install Python 3 (usually already present)
+### 1.8 Install Python 3
 
 ```bash
-# On the Fedora KVM host
 sudo dnf install -y python3
 ```
 
-**After completing these steps, the Fedora host is ready. Everything else is run from the Controller.**
+**After these steps, the Fedora host is ready. Everything else runs from the Controller.**
 
 ---
 
@@ -142,36 +121,24 @@ sudo dnf install -y python3
 ### 2.1 Install Ansible
 
 ```bash
-# On the Controller
 pip install ansible
-# or
-sudo dnf install -y ansible-core
 ```
 
 ### 2.2 Install required collections
 
 ```bash
-# From the project root on the Controller
 ansible-galaxy collection install -r requirements.yml
 ```
 
-This installs:
-
-- `community.libvirt` — provides `community.libvirt.virt` for managing VMs (KVM path).
-- `amazon.aws` — provides EC2 modules (AWS path).
-- `community.general` — general-purpose filters used by the AWS role.
-
 ### 2.3 Python dependencies
 
-**For KVM provisioning:** the `community.libvirt` collection requires `libvirt-python`:
+**For KVM provisioning:**
 
 ```bash
 pip install libvirt-python
-# or
-sudo dnf install -y python3-libvirt
 ```
 
-**For AWS provisioning:** the `amazon.aws` collection requires `boto3` and `botocore`:
+**For AWS provisioning:**
 
 ```bash
 pip install boto3 botocore
@@ -181,7 +148,7 @@ pip install boto3 botocore
 
 ## 3. Inventory
 
-Edit `inventory/hosts.yml` to match your environment:
+Edit `inventory/hosts.yml`:
 
 ```yaml
 all:
@@ -189,12 +156,16 @@ all:
     kvm_hosts:
       hosts:
         fedora-kvm:
-          ansible_host: 192.168.1.100   # Your Fedora KVM host IP
-          ansible_user: ansible          # SSH user
+          ansible_host: 192.168.1.100
+          ansible_user: ansible
           ansible_python_interpreter: /usr/bin/python3
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
 ```
 
-Test connectivity:
+Test KVM connectivity:
 
 ```bash
 ansible -i inventory/hosts.yml kvm_hosts -m ping
@@ -204,56 +175,49 @@ ansible -i inventory/hosts.yml kvm_hosts -m ping
 
 ## 4. Variables
 
-### 4.1 KVM Variables (`windows_vm` role)
+### 4.1 KVM Variables (shared by `kvm_vm_windows` and `kvm_vm_linux`)
 
-| Variable | Default | Description |
-|---|---|---|
-| `vm_name` | `windows-vm` | Name of the virtual machine |
-| `vm_memory` | `4096` | Memory in MiB |
-| `vm_vcpus` | `2` | Number of virtual CPUs |
-| `vm_disk_size` | `60G` | Virtual disk size (qemu-img format) |
-| `vm_storage_pool` | `default` | libvirt storage pool name |
-| `vm_disk_dir` | `/var/lib/libvirt/images` | Directory for VM disk images |
-| `windows_iso` | `/var/lib/libvirt/images/iso/windows.iso` | Path to Windows ISO on the KVM host |
-| `virtio_iso` | `/var/lib/libvirt/images/iso/virtio-win.iso` | Path to VirtIO driver ISO on the KVM host |
-| `vm_network` | `default` | libvirt network name |
-| `vm_network_model` | `virtio` | Network interface model |
-| `vm_os_variant` | `win10` | OS variant for optimization |
-| `vm_machine_type` | `q35` | Machine type (q35 recommended for Windows) |
-| `vm_firmware` | `bios` | Firmware type: `bios` or `uefi` |
-| `vm_uefi_loader` | `/usr/share/edk2/ovmf/OVMF_CODE.fd` | UEFI firmware path (only used when `vm_firmware: uefi`) |
-| `vm_boot_cdrom_first` | `true` | Boot from CD-ROM first for installation |
-| `vm_disk_path` | (computed) | Full path to the VM disk image |
+| Variable | Windows Default | Linux Default | Description |
+|---|---|---|---|
+| `vm_name` | `windows-vm` | `linux-vm` | VM name |
+| `vm_memory` | `4096` | `2048` | Memory in MiB |
+| `vm_vcpus` | `2` | `2` | Virtual CPUs |
+| `vm_disk_size` | `60G` | `30G` | Disk size |
+| `vm_storage_pool` | `default` | `default` | libvirt storage pool |
+| `vm_disk_dir` | `/var/lib/libvirt/images` | `/var/lib/libvirt/images` | Disk directory |
+| `vm_install_iso` | `.../iso/windows.iso` | `.../iso/linux.iso` | Installation ISO path |
+| `vm_extra_iso` | `.../iso/virtio-win.iso` | (empty) | Extra ISO (VirtIO drivers for Windows) |
+| `vm_network` | `default` | `default` | libvirt network |
+| `vm_network_model` | `virtio` | `virtio` | NIC model |
+| `vm_os_variant` | `win10` | `generic` | OS variant hint |
+| `vm_machine_type` | `q35` | `q35` | Machine type |
+| `vm_firmware` | `bios` | `bios` | `bios` or `uefi` |
+| `vm_boot_cdrom_first` | `true` | `true` | Boot CD-ROM first |
 
-### 4.2 AWS Variables (`windows_vm_aws` role)
+### 4.2 AWS Variables (shared by `aws_vm_windows` and `aws_vm_linux`)
 
-| Variable | Default | Description |
-|---|---|---|
-| `aws_instance_name` | `windows-vm` | Instance Name tag (used for idempotency) |
-| `aws_region` | `us-east-1` | AWS region |
-| `aws_instance_type` | `t3.large` | EC2 instance type |
-| `aws_ami_id` | (auto-discover) | Specific AMI ID; leave empty to find latest Windows Server 2022 |
-| `aws_ami_owner` | `amazon` | AMI owner for auto-discovery |
-| `aws_ami_name_filter` | `Windows_Server-2022-English-Full-Base-*` | AMI name pattern for auto-discovery |
-| `aws_key_name` | `my-keypair` | EC2 key pair name (must exist in the account) |
-| `aws_vpc_id` | (default VPC) | VPC ID; leave empty to use the default VPC |
-| `aws_subnet_id` | (default subnet) | Subnet ID; leave empty for default |
-| `aws_security_group_name` | `windows-vm-sg` | Security group name |
-| `aws_allowed_rdp_cidrs` | `["0.0.0.0/0"]` | CIDRs allowed RDP access (restrict in production) |
-| `aws_allowed_winrm_cidrs` | `[]` | CIDRs allowed WinRM HTTPS access |
-| `aws_root_volume_size` | `60` | Root EBS volume size in GB |
-| `aws_root_volume_type` | `gp3` | EBS volume type |
-| `aws_assign_public_ip` | `true` | Assign a public IP address |
-| `aws_tags` | `{}` | Additional tags applied to all resources |
-| `aws_user_data` | (empty) | PowerShell user data script for bootstrap |
+| Variable | Windows Default | Linux Default | Description |
+|---|---|---|---|
+| `aws_instance_name` | `windows-vm` | `linux-vm` | Instance Name tag |
+| `aws_region` | `us-east-2` | `us-east-2` | AWS region |
+| `aws_instance_type` | `t3.large` | `t3.medium` | Instance type |
+| `aws_ami_id` | (auto) | (auto) | Specific AMI ID |
+| `aws_ami_name_filter` | `Windows_Server-2022-*` | `al2023-ami-*-x86_64` | AMI lookup filter |
+| `aws_key_name` | `my-keypair` | `my-keypair` | EC2 key pair |
+| `aws_vpc_id` | (default VPC) | (default VPC) | VPC ID |
+| `aws_subnet_id` | (default) | (default) | Subnet ID |
+| `aws_security_group_name` | `windows-vm-sg` | `linux-vm-sg` | Security group |
+| `aws_allowed_rdp_cidrs` | `["0.0.0.0/0"]` | n/a | RDP access CIDRs |
+| `aws_allowed_ssh_cidrs` | n/a | `["0.0.0.0/0"]` | SSH access CIDRs |
+| `aws_root_volume_size` | `60` | `30` | Root volume GB |
+| `aws_root_volume_type` | `gp3` | `gp3` | EBS volume type |
+| `aws_assign_public_ip` | `true` | `true` | Public IP |
 
 ---
 
-## 5. Provisioning a Windows VM
+## 5. Provisioning
 
-### 5.1 KVM Provisioning
-
-Run from the **Controller**:
+### 5.1 KVM Windows
 
 ```bash
 ansible-playbook -i inventory/hosts.yml \
@@ -264,396 +228,234 @@ ansible-playbook -i inventory/hosts.yml \
   -e vm_disk_size=60G
 ```
 
-With custom ISO paths:
+### 5.2 KVM Linux
 
 ```bash
 ansible-playbook -i inventory/hosts.yml \
-  playbooks/provision_windows.yml \
-  -e vm_name=win-demo01 \
-  -e vm_memory=8192 \
-  -e vm_vcpus=4 \
-  -e vm_disk_size=80G \
-  -e windows_iso=/var/lib/libvirt/images/iso/Win11_23H2_English_x64.iso \
-  -e virtio_iso=/var/lib/libvirt/images/iso/virtio-win-0.1.240.iso
+  playbooks/provision_linux.yml \
+  -e vm_name=fedora-dev01 \
+  -e vm_memory=4096 \
+  -e vm_vcpus=2 \
+  -e vm_install_iso=/var/lib/libvirt/images/iso/Fedora-Server-dvd-x86_64-40.iso \
+  -e vm_os_variant=fedora40
 ```
 
-For UEFI firmware (required for Windows 11):
-
-```bash
-ansible-playbook -i inventory/hosts.yml \
-  playbooks/provision_windows.yml \
-  -e vm_name=win11-uefi \
-  -e vm_firmware=uefi
-```
-
-### 5.2 AWS Provisioning
-
-**Prerequisites:**
-
-1. AWS credentials configured (environment variables, `~/.aws/credentials`, or IAM role):
-   ```bash
-   export AWS_ACCESS_KEY_ID="AKIA..."
-   export AWS_SECRET_ACCESS_KEY="..."
-   export AWS_REGION="us-east-1"
-   ```
-
-2. An EC2 key pair created in the target region:
-   ```bash
-   aws ec2 create-key-pair --key-name my-keypair --query 'KeyMaterial' --output text > my-keypair.pem
-   chmod 400 my-keypair.pem
-   ```
-
-**Run from the Controller:**
+### 5.3 AWS Windows
 
 ```bash
 ansible-playbook playbooks/provision_windows_aws.yml \
   -e aws_instance_name=win-demo01 \
   -e aws_instance_type=t3.large \
-  -e aws_key_name=my-keypair \
-  -e aws_root_volume_size=80
-```
-
-With a specific AMI and region:
-
-```bash
-ansible-playbook playbooks/provision_windows_aws.yml \
-  -e aws_instance_name=win-demo01 \
-  -e aws_region=eu-west-1 \
-  -e aws_ami_id=ami-0abcdef1234567890 \
   -e aws_key_name=my-keypair
 ```
 
-Restrict RDP access to your IP:
+### 5.4 AWS Linux
 
 ```bash
-ansible-playbook playbooks/provision_windows_aws.yml \
-  -e aws_instance_name=win-demo01 \
+ansible-playbook playbooks/provision_linux_aws.yml \
+  -e aws_instance_name=linux-demo01 \
+  -e aws_instance_type=t3.medium \
+  -e aws_key_name=my-keypair
+```
+
+For Ubuntu instead of Amazon Linux:
+
+```bash
+ansible-playbook playbooks/provision_linux_aws.yml \
+  -e aws_instance_name=ubuntu-demo01 \
   -e aws_key_name=my-keypair \
-  -e '{"aws_allowed_rdp_cidrs": ["203.0.113.10/32"]}'
+  -e aws_ami_owner=099720109477 \
+  -e 'aws_ami_name_filter=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*'
 ```
 
 ---
 
-## 6. Expected Result
+## 6. Idempotency
 
-### 6.1 KVM
+All playbooks are safe to run multiple times.
 
-On successful provisioning, the playbook reports:
+- **VM/instance does not exist**: creates it.
+- **VM/instance already exists**: reports it and makes no changes.
 
-```
-========================================
- Windows VM Provisioning Summary
-========================================
- VM Name:        win-demo01
- Status:         running
- Already Existed: False
-----------------------------------------
- vCPUs:          4
- Memory:         8192 MiB
- Disk:           /var/lib/libvirt/images/win-demo01.qcow2
- Disk Size:      60G
-----------------------------------------
- Windows ISO:    /var/lib/libvirt/images/iso/windows.iso
- VirtIO ISO:     /var/lib/libvirt/images/iso/virtio-win.iso
- Network:        default
- Storage Pool:   default
-----------------------------------------
- KVM Host:       fedora-kvm
- Machine Type:   q35
- Firmware:       bios
-========================================
- VM created and started successfully.
- Connect via: virt-manager or virt-viewer on the KVM host,
- or use SPICE/VNC remotely to complete Windows installation.
-========================================
-```
+No destructive operations are performed. Playbooks never destroy, terminate, or overwrite existing resources.
 
-The VM will boot from the Windows ISO. Connect to the VM's SPICE console to complete the interactive Windows installation.
-
-### 6.2 AWS
-
-```
-========================================
- AWS Windows VM Provisioning Summary
-========================================
- Instance Name:   win-demo01
- Instance ID:     i-0abc123def456789a
- State:           running
- Already Existed: False
-----------------------------------------
- Instance Type:   t3.large
- AMI:             ami-0abcdef1234567890
- Region:          us-east-1
-----------------------------------------
- Public IP:       54.123.45.67
- Private IP:      172.31.10.20
- Key Pair:        my-keypair
- Security Group:  windows-vm-sg
-----------------------------------------
- Root Volume:     80 GB (gp3)
-========================================
- Instance created and running.
- Retrieve the Windows password:
-   aws ec2 get-password-data \
-     --instance-id i-0abc123def456789a \
-     --priv-launch-key /path/to/my-keypair.pem \
-     --region us-east-1
- Then connect via RDP to 54.123.45.67
-========================================
-```
+For AWS, idempotency is based on the `Name` tag.
 
 ---
 
-## 7. Idempotency
+## 7. Project Structure
 
-The playbook is safe to run multiple times.
+```
+kvm-windows/
+├── ansible.cfg
+├── requirements.yml
+├── inventory/
+│   └── hosts.yml
+├── playbooks/
+│   ├── provision_windows.yml
+│   ├── provision_linux.yml
+│   ├── provision_windows_aws.yml
+│   └── provision_linux_aws.yml
+├── roles/
+│   ├── aws_vm/                        # Shared AWS tasks
+│   │   └── tasks/
+│   │       ├── validate.yml
+│   │       ├── ami.yml
+│   │       ├── vpc.yml
+│   │       └── provision.yml
+│   ├── aws_vm_windows/                # AWS Windows entry point
+│   │   ├── defaults/main.yml
+│   │   ├── tasks/
+│   │   │   ├── main.yml
+│   │   │   ├── network.yml
+│   │   │   └── summary.yml
+│   │   └── README.md
+│   ├── aws_vm_linux/                  # AWS Linux entry point
+│   │   ├── defaults/main.yml
+│   │   ├── tasks/
+│   │   │   ├── main.yml
+│   │   │   ├── network.yml
+│   │   │   └── summary.yml
+│   │   └── README.md
+│   ├── kvm_vm/                        # Shared KVM tasks
+│   │   └── tasks/
+│   │       ├── validate.yml
+│   │       ├── preflight.yml
+│   │       └── provision.yml
+│   ├── kvm_vm_windows/                # KVM Windows entry point
+│   │   ├── defaults/main.yml
+│   │   ├── tasks/
+│   │   │   ├── main.yml
+│   │   │   └── summary.yml
+│   │   ├── templates/vm.xml.j2
+│   │   ├── handlers/main.yml
+│   │   ├── files/
+│   │   └── README.md
+│   └── kvm_vm_linux/                  # KVM Linux entry point
+│       ├── defaults/main.yml
+│       ├── tasks/
+│       │   ├── main.yml
+│       │   └── summary.yml
+│       ├── templates/vm.xml.j2
+│       ├── handlers/main.yml
+│       ├── files/
+│       └── README.md
+└── README.md
+```
 
-- **VM does not exist**: creates the disk, defines the VM, starts it.
-- **VM already exists**: reports that the VM exists and makes no changes. The existing disk, configuration, and state are preserved.
+**Base roles** (`aws_vm`, `kvm_vm`) contain only shared task files — they are not called directly.
 
-Both playbooks follow the same principle — no destructive operations are performed. The playbooks will never destroy, terminate, undefine, or overwrite an existing VM/instance.
-
-For AWS specifically, idempotency is based on the `Name` tag — if an instance with the given name exists and is not terminated, creation is skipped.
+**Entry-point roles** (`aws_vm_windows`, `aws_vm_linux`, `kvm_vm_windows`, `kvm_vm_linux`) own the defaults, templates, and OS-specific tasks. They pull in shared tasks via `include_tasks`.
 
 ---
 
-## 8. Troubleshooting
+## 8. OS-Specific Differences
 
-### SSH connection fails
+| Aspect | Windows | Linux |
+|---|---|---|
+| **KVM XML** | Hyper-V enlightenments, `localtime`, `hypervclock`, QXL video | No Hyper-V, `utc` clock, VirtIO video |
+| **KVM extra ISO** | VirtIO driver ISO | None (kernel has VirtIO built-in) |
+| **AWS AMI** | Windows Server 2022 | Amazon Linux 2023 |
+| **AWS SG ports** | RDP 3389, WinRM 5986 | SSH 22 |
+| **AWS access** | `get-password-data` + RDP | SSH with key pair |
+
+---
+
+## 9. Troubleshooting
+
+### KVM: SSH connection fails
 
 ```bash
-# Test SSH from the Controller
 ssh -v ansible@fedora-kvm
 ```
 
-- Verify the IP/hostname in `inventory/hosts.yml`.
-- Verify the SSH key is deployed (`ssh-copy-id`).
-- Check that sshd is running on the Fedora host.
-
-### Ansible ping fails
+### KVM: libvirtd is not running
 
 ```bash
-ansible -i inventory/hosts.yml kvm_hosts -m ping -vvv
-```
-
-- Check `ansible_user` and `ansible_host` in the inventory.
-- Check that Python 3 is installed on the Fedora host.
-- Verify `ansible_python_interpreter` is correct.
-
-### Permission denied / sudo errors
-
-- Verify the sudoers file: `sudo cat /etc/sudoers.d/ansible`
-- The Ansible user must have `NOPASSWD: ALL` or at minimum permission to run `virsh`, `qemu-img`, and manage `/var/lib/libvirt/`.
-- The Ansible user must be in the `libvirt` group.
-
-### libvirtd is not running
-
-```bash
-# On the Fedora host
-sudo systemctl status libvirtd
 sudo systemctl start libvirtd
 ```
 
-### Storage pool not found
+### KVM: Storage pool / network / ISO not found
 
 ```bash
-# On the Fedora host
 sudo virsh pool-list --all
-```
-
-Create the pool if missing (see One-Time Preparation above).
-
-### ISO file not found
-
-- Verify the ISO paths exist on the **Fedora KVM host** (not on the Controller).
-- Check file permissions — the `qemu` user needs read access.
-
-```bash
-# On the Fedora host
+sudo virsh net-list --all
 ls -la /var/lib/libvirt/images/iso/
 ```
 
-### KVM not available
+### KVM: community.libvirt or libvirt-python missing
 
 ```bash
-# On the Fedora host
-sudo virt-host-validate qemu
-lsmod | grep kvm
-```
-
-- Ensure hardware virtualization (VT-x/AMD-V) is enabled in BIOS/UEFI.
-- Ensure the `kvm` kernel module is loaded.
-
-### Network not found
-
-```bash
-# On the Fedora host
-sudo virsh net-list --all
-```
-
-Start the default network if needed:
-
-```bash
-sudo virsh net-start default
-sudo virsh net-autostart default
-```
-
-### community.libvirt collection not installed
-
-```bash
-# On the Controller
-ansible-galaxy collection list | grep libvirt
 ansible-galaxy collection install -r requirements.yml
-```
-
-### libvirt-python import error
-
-If you see `No module named 'libvirt'`:
-
-```bash
-# On the Controller
 pip install libvirt-python
-# or
-sudo dnf install -y python3-libvirt
 ```
 
-### AWS: "No module named 'boto3'"
+### AWS: boto3 missing
 
 ```bash
 pip install boto3 botocore
 ```
 
-### AWS: "Unable to locate credentials"
-
-Ensure credentials are available. Any of these methods works:
+### AWS: Credentials not found
 
 ```bash
-# Environment variables
 export AWS_ACCESS_KEY_ID="AKIA..."
 export AWS_SECRET_ACCESS_KEY="..."
-
-# Or named profile
-export AWS_PROFILE=my-profile
-
-# Or configure the default profile
-aws configure
+# or: aws configure
 ```
 
-### AWS: "An error occurred (UnauthorizedOperation)"
+### AWS: Key pair not found
 
-The IAM user/role needs at minimum these permissions:
-- `ec2:RunInstances`, `ec2:DescribeInstances`, `ec2:CreateTags`
-- `ec2:CreateSecurityGroup`, `ec2:AuthorizeSecurityGroupIngress`, `ec2:DescribeSecurityGroups`
-- `ec2:DescribeVpcs`, `ec2:DescribeSubnets`
-- `ec2:DescribeImages`
-
-### AWS: "VPCIdNotSpecified" or no default VPC
-
-Either create a default VPC or provide `aws_vpc_id` and `aws_subnet_id` explicitly:
+Key pairs are per-region. Create one in the target region:
 
 ```bash
-ansible-playbook playbooks/provision_windows_aws.yml \
-  -e aws_vpc_id=vpc-0123456789abcdef0 \
-  -e aws_subnet_id=subnet-0123456789abcdef0 \
-  -e aws_instance_name=win-demo01 \
-  -e aws_key_name=my-keypair
+aws ec2 create-key-pair --key-name my-keypair \
+  --query 'KeyMaterial' --output text \
+  --region us-east-2 > my-keypair.pem
+chmod 400 my-keypair.pem
 ```
+
+### AWS: No default VPC
+
+Provide `aws_vpc_id` and `aws_subnet_id` explicitly via `-e`.
 
 ### AWS: Cannot retrieve Windows password
 
-The password takes a few minutes to become available after launch:
+Wait 5-10 minutes after launch, then:
 
 ```bash
 aws ec2 get-password-data \
-  --instance-id i-0abc123def456789a \
-  --priv-launch-key /path/to/my-keypair.pem \
-  --region us-east-1
-```
-
-If the output is empty, wait 5–10 minutes and retry.
-
----
-
-## 9. Project Structure
-
-```
-kvm-windows/
-├── ansible.cfg                        # Ansible configuration
-├── requirements.yml                   # Required Ansible collections
-├── inventory/
-│   └── hosts.yml                      # Inventory (KVM host + localhost)
-├── playbooks/
-│   ├── provision_windows.yml          # KVM provisioning playbook
-│   └── provision_windows_aws.yml      # AWS provisioning playbook
-├── roles/
-│   ├── windows_vm/                    # KVM role
-│   │   ├── defaults/main.yml
-│   │   ├── tasks/
-│   │   │   ├── main.yml
-│   │   │   ├── validate.yml
-│   │   │   ├── preflight.yml
-│   │   │   ├── provision.yml
-│   │   │   └── summary.yml
-│   │   ├── templates/vm.xml.j2
-│   │   ├── handlers/main.yml
-│   │   ├── files/                     # Reserved for autounattend.xml
-│   │   └── README.md
-│   └── windows_vm_aws/               # AWS role
-│       ├── defaults/main.yml
-│       ├── tasks/
-│       │   ├── main.yml
-│       │   ├── validate.yml
-│       │   ├── ami.yml
-│       │   ├── network.yml
-│       │   ├── provision.yml
-│       │   └── summary.yml
-│       ├── handlers/main.yml
-│       └── README.md
-└── README.md
+  --instance-id i-0abc123... \
+  --priv-launch-key ./my-keypair.pem \
+  --region us-east-2
 ```
 
 ---
 
 ## 10. Shell Commands Used by Ansible
 
-The role uses shell commands only where no Ansible module exists:
-
 | Command | Reason |
 |---|---|
-| `virsh pool-info` | No Ansible module inspects storage pool details |
+| `virsh pool-info` | No Ansible module inspects storage pool state |
 | `qemu-img create` | No Ansible module creates qcow2 disk images |
 
-Both commands are executed **remotely on the KVM host** by Ansible — the operator does not run them manually.
+Both run remotely on the KVM host via Ansible.
 
 ---
 
 ## 11. Limitations
 
-**KVM:**
+**KVM:** OS installation is interactive (boots from ISO). No unattended install or post-install configuration yet.
 
-- Windows installation is **interactive** — the VM boots from the ISO and requires manual console interaction to complete the OS installation.
-- No `autounattend.xml` is provided yet for unattended installation.
-- No WinRM or SSH bootstrap is configured on the Windows guest.
-- The VM uses SPICE for console access; the operator needs network access to the KVM host's SPICE port, or access to virt-manager.
-
-**AWS:**
-
-- The instance uses the default Windows AMI with no customization — initial access is via RDP with the auto-generated administrator password.
-- No WinRM or user data bootstrap is configured by default.
-- The security group defaults to `0.0.0.0/0` for RDP — restrict `aws_allowed_rdp_cidrs` in production.
-- The role uses the default VPC unless `aws_vpc_id` is provided.
-- No Elastic IP is assigned — the public IP may change if the instance is stopped and started.
+**AWS:** Instances use stock AMIs. Security groups default to open access — restrict CIDRs in production. No Elastic IP — public IP changes on stop/start.
 
 ---
 
 ## 12. Next Steps
 
-Planned enhancements for future iterations:
-
-1. **Unattended Windows installation** — add `autounattend.xml` as a floppy image to automate the Windows installer.
-2. **WinRM bootstrap** — configure WinRM during unattended setup so Ansible can manage the Windows guest after installation.
-3. **Post-provisioning configuration** — Ansible playbooks to configure the Windows VM (hostname, network, domain join, etc.).
-4. **Windows software installation** — use Ansible's `win_chocolatey` or `win_package` modules to install software.
-5. **Certificate deployment** — deploy certificates to the Windows trust store via Ansible.
-6. **VM lifecycle management** — playbooks for stop, start, snapshot, and destroy operations.
-7. **Multiple VM provisioning** — support provisioning multiple VMs from a single variable file.
+1. **Unattended Windows install** — `autounattend.xml` as floppy image
+2. **Cloud-init for Linux** — automated Linux setup via cloud-init ISO
+3. **WinRM bootstrap** — enable WinRM for Ansible management of Windows guests
+4. **Post-provisioning** — hostname, networking, domain join, software
+5. **VM lifecycle** — stop, start, snapshot, destroy playbooks
+6. **Multi-VM provisioning** — batch creation from a variable file

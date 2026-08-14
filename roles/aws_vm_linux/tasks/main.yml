@@ -1,0 +1,22 @@
+---
+- name: Validate variables
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../aws_vm/tasks/validate.yml"
+
+- name: Resolve the Linux AMI
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../aws_vm/tasks/ami.yml"
+
+- name: Resolve VPC
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../aws_vm/tasks/vpc.yml"
+
+- name: Provision networking
+  ansible.builtin.import_tasks: network.yml
+
+- name: Provision the instance
+  ansible.builtin.include_tasks:
+    file: "{{ role_path }}/../aws_vm/tasks/provision.yml"
+
+- name: Display provisioning summary
+  ansible.builtin.import_tasks: summary.yml

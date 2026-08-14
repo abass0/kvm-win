@@ -1,0 +1,32 @@
+---
+# VM identity
+vm_name: "windows-vm"
+
+# VM resources
+vm_memory: 4096
+vm_vcpus: 2
+vm_disk_size: "60G"
+
+# Storage
+vm_storage_pool: "default"
+vm_disk_dir: "/var/lib/libvirt/images"
+
+# Installation media
+vm_install_iso: "/var/lib/libvirt/images/iso/windows.iso"
+vm_extra_iso: "/var/lib/libvirt/images/iso/virtio-win.iso"
+
+# Network
+vm_network: "default"
+vm_network_model: "virtio"
+
+# VM hardware
+vm_os_variant: "win10"
+vm_machine_type: "q35"
+vm_firmware: "bios"
+vm_uefi_loader: "/usr/share/edk2/ovmf/OVMF_CODE.fd"
+
+# Boot order
+vm_boot_cdrom_first: true
+
+# Computed paths
+vm_disk_path: "{{ vm_disk_dir }}/{{ vm_name }}.qcow2"

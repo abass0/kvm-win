@@ -1,0 +1,96 @@
+<domain type='kvm'>
+  <name>{{ vm_name }}</name>
+  <memory unit='MiB'>{{ vm_memory }}</memory>
+  <currentMemory unit='MiB'>{{ vm_memory }}</currentMemory>
+  <vcpu placement='static'>{{ vm_vcpus }}</vcpu>
+
+  <os>
+{% if vm_firmware == 'uefi' %}
+    <type arch='x86_64' machine='{{ vm_machine_type }}'>hvm</type>
+    <loader readonly='yes' type='pflash'>{{ vm_uefi_loader }}</loader>
+{% else %}
+    <type arch='x86_64' machine='{{ vm_machine_type }}'>hvm</type>
+{% endif %}
+{% if vm_boot_cdrom_first | default(true) %}
+    <boot dev='cdrom'/>
+    <boot dev='hd'/>
+{% else %}
+    <boot dev='hd'/>
+    <boot dev='cdrom'/>
+{% endif %}
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+
+  <cpu mode='host-passthrough' check='none' migratable='on'/>
+
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+
+  <devices>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' discard='unmap'/>
+      <source file='{{ vm_disk_path }}'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{{ vm_install_iso }}'/>
+      <target dev='sda' bus='sata'/>
+      <readonly/>
+    </disk>
+
+{% if vm_extra_iso is defined and vm_extra_iso | length > 0 %}
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{{ vm_extra_iso }}'/>
+      <target dev='sdb' bus='sata'/>
+      <readonly/>
+    </disk>
+{% endif %}
+
+    <interface type='network'>
+      <source network='{{ vm_network }}'/>
+      <model type='{{ vm_network_model }}'/>
+    </interface>
+
+    <graphics type='spice' autoport='yes'>
+      <listen type='address' address='0.0.0.0'/>
+    </graphics>
+
+    <video>
+      <model type='virtio' heads='1' primary='yes'/>
+    </video>
+
+    <input type='tablet' bus='usb'/>
+    <input type='keyboard' bus='usb'/>
+
+    <controller type='usb' model='qemu-xhci' ports='15'/>
+
+    <serial type='pty'>
+      <target port='0'/>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+  </devices>
+</domain>

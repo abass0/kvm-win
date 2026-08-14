@@ -1,9 +1,9 @@
 ---
-- name: Provision a Windows VM on AWS EC2
+- name: Provision a Linux VM on AWS EC2
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
 
   roles:
-    - aws_vm_windows
+    - aws_vm_linux

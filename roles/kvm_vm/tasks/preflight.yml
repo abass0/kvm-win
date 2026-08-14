@@ -1,0 +1,63 @@
+---
+- name: Check that libvirtd service is running
+  ansible.builtin.service_facts:
+
+- name: Fail if libvirtd is not running
+  ansible.builtin.assert:
+    that:
+      - "'libvirtd.service' in ansible_facts.services"
+      - >-
+        ansible_facts.services['libvirtd.service'].state
+        == 'running'
+    fail_msg: >-
+      libvirtd is not running on {{ inventory_hostname }}.
+      Ensure libvirt is installed and the service is started.
+    quiet: true
+
+- name: Check that the storage pool exists and is active
+  ansible.builtin.command:
+    cmd: virsh pool-info {{ vm_storage_pool }}
+  register: pool_info
+  changed_when: false
+  failed_when: pool_info.rc != 0
+
+- name: Fail if the storage pool is not active
+  ansible.builtin.assert:
+    that:
+      - >-
+        'running' in pool_info.stdout
+        or 'active' in pool_info.stdout
+    fail_msg: >-
+      Storage pool '{{ vm_storage_pool }}' exists but is not
+      active. Start it with: virsh pool-start {{ vm_storage_pool }}
+    quiet: true
+
+- name: Check that the installation ISO exists on the KVM host
+  ansible.builtin.stat:
+    path: "{{ vm_install_iso }}"
+  register: install_iso_stat
+
+- name: Fail if the installation ISO does not exist
+  ansible.builtin.assert:
+    that:
+      - install_iso_stat.stat.exists
+    fail_msg: >-
+      Installation ISO not found at '{{ vm_install_iso }}'
+      on {{ inventory_hostname }}.
+    quiet: true
+
+- name: Check that the extra ISO exists on the KVM host
+  ansible.builtin.stat:
+    path: "{{ vm_extra_iso }}"
+  register: extra_iso_stat
+  when: vm_extra_iso is defined and vm_extra_iso | length > 0
+
+- name: Fail if the extra ISO does not exist
+  ansible.builtin.assert:
+    that:
+      - extra_iso_stat.stat.exists
+    fail_msg: >-
+      Extra ISO not found at '{{ vm_extra_iso }}'
+      on {{ inventory_hostname }}.
+    quiet: true
+  when: vm_extra_iso is defined and vm_extra_iso | length > 0
