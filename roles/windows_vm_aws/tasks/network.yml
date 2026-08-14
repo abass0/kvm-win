@@ -27,6 +27,31 @@
       a default VPC exists in region '{{ aws_region }}'.
     quiet: true
 
+- name: Build RDP rules
+  ansible.builtin.set_fact:
+    sg_rdp_rules: "{{ sg_rdp_rules | default([]) + [item] }}"
+  loop: >-
+    {{ aws_allowed_rdp_cidrs | map('regex_replace', '^(.*)$',
+    '{"cidr_ip": "\\1", "proto": "tcp",
+    "from_port": 3389, "to_port": 3389,
+    "rule_desc": "RDP"}')
+    | map('from_json') | list }}
+
+- name: Build WinRM rules
+  ansible.builtin.set_fact:
+    sg_winrm_rules: "{{ sg_winrm_rules | default([]) + [item] }}"
+  loop: >-
+    {{ aws_allowed_winrm_cidrs | map('regex_replace', '^(.*)$',
+    '{"cidr_ip": "\\1", "proto": "tcp",
+    "from_port": 5986, "to_port": 5986,
+    "rule_desc": "WinRM HTTPS"}')
+    | map('from_json') | list }}
+  when: aws_allowed_winrm_cidrs | length > 0
+
+- name: Combine security group rules
+  ansible.builtin.set_fact:
+    sg_rules: "{{ sg_rdp_rules | default([]) + sg_winrm_rules | default([]) }}"
+
 - name: Create security group for the Windows instance
   amazon.aws.ec2_security_group:
     name: "{{ aws_security_group_name }}"
@@ -36,18 +61,4 @@
     rules: "{{ sg_rules }}"
     tags: "{{ aws_tags | combine({'Name': aws_security_group_name}) }}"
     state: present
-  vars:
-    rdp_rules: >-
-      {{
-        aws_allowed_rdp_cidrs | map('community.general.dict_kv', 'cidr_ip')
-        | map('combine', {'proto': 'tcp', 'from_port': 3389, 'to_port': 3389, 'rule_desc': 'RDP'})
-        | list
-      }}
-    winrm_rules: >-
-      {{
-        aws_allowed_winrm_cidrs | map('community.general.dict_kv', 'cidr_ip')
-        | map('combine', {'proto': 'tcp', 'from_port': 5986, 'to_port': 5986, 'rule_desc': 'WinRM HTTPS'})
-        | list
-      }}
-    sg_rules: "{{ rdp_rules + winrm_rules }}"
   register: sg_result
